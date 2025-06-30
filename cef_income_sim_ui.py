@@ -1,5 +1,3 @@
-# Streamlit-based CEF Income Simulation UI
-
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -47,6 +45,8 @@ if run_sim:
         monthly_values = []
         monthly_working_cap = []
         monthly_income = []
+        cash = 0  # Track cash separately as in original
+
         for _ in range(months):
             equity_alloc = value * (1 - taxable_income_ratio)
             taxable_alloc = value * taxable_income_ratio
@@ -60,18 +60,19 @@ if run_sim:
             # Income before growth
             income = equity_alloc * equity_yield_month + taxable_alloc * taxable_yield_month
 
-            # Income reinvestment adjustment
+            # Reinvest portion of income
             reinvested_income = income * income_reinvestment_pct
             withdrawn_income = income * (1 - income_reinvestment_pct)
+            cash += withdrawn_income  # Add withdrawn income to cash
 
-            # Monthly compounding including reinvested income
+            # Monthly compounding of principal plus reinvested income
             equity_value = equity_alloc * (1 + equity_yield_month + equity_growth_month) + reinvested_income * (1 - taxable_income_ratio)
             taxable_value = taxable_alloc * (1 + taxable_yield_month + taxable_growth_month) + reinvested_income * taxable_income_ratio
 
-            value = equity_value + taxable_value + withdrawn_income  # Withdrawn income is added as cash (assumed kept separate)
+            value = equity_value + taxable_value + cash
 
             monthly_values.append(value)
-            monthly_working_cap.append(value)  # Assuming working capital = total portfolio value here
+            monthly_working_cap.append(value)  # Assuming working capital includes cash + portfolio
             monthly_income.append(income * 12)  # Annualized income
 
         monthly_records.append(monthly_values)
