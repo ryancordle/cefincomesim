@@ -20,12 +20,6 @@ simulations = st.sidebar.slider("Number of Simulations", 100, 5000, 1000, step=1
 reinvestment_pct = st.sidebar.slider("Income Reinvestment Percentage (%)", 0, 100, 100) / 100
 taxable_income_ratio = st.sidebar.slider("% of Portfolio in Taxable Income CEFs", 0, 100, 50) / 100
 
-# CEF Yield and Growth Settings
-equity_yield_range = (0.06, 0.10)
-taxable_yield_range = (0.08, 0.15)
-equity_growth_range = (0.04, 0.10)
-taxable_growth_range = (-0.02, 0.02)
-
 # Run simulation only when button pressed
 if run_sim:
     np.random.seed(42)
@@ -35,21 +29,28 @@ if run_sim:
     for _ in range(simulations):
         value = initial_investment
         cost_basis = initial_investment
+        cash = 0
         month_vals, month_caps, month_incomes = [], [], []
 
         for _ in range(months):
+            # Determine CEF type allocation
             equity_val = value * (1 - taxable_income_ratio)
             taxable_val = value * taxable_income_ratio
 
-            eq_yield = np.random.uniform(*equity_yield_range) / 12
-            tx_yield = np.random.uniform(*taxable_yield_range) / 12
-            eq_growth = np.random.uniform(*equity_growth_range) / 12
-            tx_growth = np.random.uniform(*taxable_growth_range) / 12
+            # Generate returns and yields
+            equity_price_return = np.random.triangular(0.04, 0.07, 0.10) / 12
+            taxable_price_return = np.random.triangular(-0.02, 0.00, 0.02) / 12
+            equity_yield = np.random.triangular(0.06, 0.08, 0.10) / 12
+            taxable_yield = np.random.triangular(0.08, 0.11, 0.15) / 12
 
-            income = equity_val * eq_yield + taxable_val * tx_yield
+            income = equity_val * equity_yield + taxable_val * taxable_yield
             reinvest = income * reinvestment_pct
-            value = equity_val * (1 + eq_growth) + taxable_val * (1 + tx_growth) + reinvest
+            distributed = income * (1 - reinvestment_pct)
 
+            equity_val *= (1 + equity_price_return)
+            taxable_val *= (1 + taxable_price_return)
+
+            value = equity_val + taxable_val + reinvest
             cost_basis += reinvest
 
             month_vals.append(value)
@@ -93,6 +94,6 @@ if run_sim:
 
     st.subheader("📊 Simulation Summary Table")
     st.dataframe(summary.set_index("Metric"))
-    st.caption("Note: This reflects a simplified Monte Carlo model. Portfolio behavior depends heavily on initial parameters.")
+    st.caption("This version reflects your full Monte Carlo logic using reinvestment and working capital definitions.")
 else:
     st.info("Adjust the parameters and click **Run Simulation** to begin.")
