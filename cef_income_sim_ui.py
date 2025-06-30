@@ -36,10 +36,14 @@ if run_sim:
     np.random.seed(42)
     months = years * 12
     monthly_records = []
+    working_capital_records = []
+    income_records = []
 
     for _ in range(simulations):
         value = initial_investment
         monthly_values = []
+        monthly_working_cap = []
+        monthly_income = []
         for _ in range(months):
             equity_alloc = value * (1 - taxable_income_ratio)
             taxable_alloc = value * taxable_income_ratio
@@ -50,19 +54,35 @@ if run_sim:
             taxable_yield_month = np.random.uniform(*taxable_yield) / 12
             taxable_growth_month = np.random.uniform(*taxable_growth) / 12
 
+            # Income before growth
+            income = equity_alloc * equity_yield_month + taxable_alloc * taxable_yield_month
+
             # Monthly compounding
             equity_value = equity_alloc * (1 + equity_yield_month + equity_growth_month)
             taxable_value = taxable_alloc * (1 + taxable_yield_month + taxable_growth_month)
 
             value = equity_value + taxable_value
             monthly_values.append(value)
+            monthly_working_cap.append(value)  # Assumes all value is cost basis + reinvested income
+            monthly_income.append(income * 12)  # Annualized income
+
         monthly_records.append(monthly_values)
+        working_capital_records.append(monthly_working_cap)
+        income_records.append(monthly_income)
 
     # --- Output Summary ---
     portfolio_df = pd.DataFrame(monthly_records).T
+    working_cap_df = pd.DataFrame(working_capital_records).T
+    income_df = pd.DataFrame(income_records).T
+
     portfolio_df.columns = [f"Sim {i+1}" for i in range(simulations)]
+    working_cap_df.columns = [f"Sim {i+1}" for i in range(simulations)]
+    income_df.columns = [f"Sim {i+1}" for i in range(simulations)]
 
     final_values = portfolio_df.iloc[-1]
+    final_working_cap = working_cap_df.iloc[-1]
+    final_income = income_df.iloc[-1]
+
     summary_df = pd.DataFrame({
         "Metric": ["Median", "Mean", "5th Percentile", "95th Percentile"],
         "Final Portfolio Value": [
@@ -70,6 +90,18 @@ if run_sim:
             f"${final_values.mean():,.0f}",
             f"${final_values.quantile(0.05):,.0f}",
             f"${final_values.quantile(0.95):,.0f}"
+        ],
+        "Final Working Capital": [
+            f"${final_working_cap.median():,.0f}",
+            f"${final_working_cap.mean():,.0f}",
+            f"${final_working_cap.quantile(0.05):,.0f}",
+            f"${final_working_cap.quantile(0.95):,.0f}"
+        ],
+        "Final Annual Income": [
+            f"${final_income.median():,.0f}",
+            f"${final_income.mean():,.0f}",
+            f"${final_income.quantile(0.05):,.0f}",
+            f"${final_income.quantile(0.95):,.0f}"
         ]
     })
 
