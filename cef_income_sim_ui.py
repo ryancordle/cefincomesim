@@ -123,22 +123,27 @@ monthly_working_capital = np.zeros((num_simulations, total_periods))
 trades_per_month = np.zeros((num_simulations, total_periods))
 num_total_cefs_invested_in = np.full(num_simulations, num_cefs_initial, dtype=int)
 
-# Simulation loop (same as your original code, applying income reinvestment % on reinvestable portion)
+# --- Simulation Loop ---
+
 for month in range(1, total_periods + 1):
     current_month_index = month - 1
-    # Simulate interest rates
+
+    # Simulate market interest rate
     if current_month_index > 0:
         monthly_market_interest_rates[:, current_month_index] = np.clip(
             monthly_market_interest_rates[:, current_month_index - 1] + np.random.normal(0, interest_rate_volatility_monthly, num_simulations),
             0.005, 0.15
         )
     current_interest_rate_for_month = monthly_market_interest_rates[:, current_month_index]
+
     if current_month_index == 0:
         interest_rate_delta = np.zeros(num_simulations)
     else:
         interest_rate_delta = current_interest_rate_for_month - monthly_market_interest_rates[:, current_month_index - 1]
 
     price_impact_from_rates = -interest_rate_delta * interest_rate_price_sensitivity
+
+    # Monthly returns for each CEF
     returns = np.random.normal(
         cef_monthly_base_returns,
         cef_monthly_volatilities,
@@ -147,15 +152,79 @@ for month in range(1, total_periods + 1):
     returns += price_impact_from_rates[:, np.newaxis]
     cef_prices *= (1 + returns)
 
+    # Adjust yields by interest rates
     yield_adjustment_from_rates = (current_interest_rate_for_month - initial_market_interest_rate) * yield_sensitivity_to_rates
     current_cef_monthly_yields = np.clip(
         cef_base_annual_yields / periods_per_year + yield_adjustment_from_rates[:, np.newaxis] / periods_per_year,
         0.001, 0.20 / periods_per_year
     )
 
-    # SELL logic here (omitted for brevity, same as your original code) ...
+    # SELL: Take profits >1%
+    for i in range(num_simulations):
+        current_held_cef_indices = np.where(cef_units[i, :num_total_cefs_invested_in[i]] > 0)[0]
 
-    # Distributions
+        if current_held_cef_indices.size > 0:
+            current_avg_cost_per_unit = np.where(cef_units[i, current_held_cef_indices] > 0,
+                                                 cost_basis_dollars[i, current_held_cef_indices] / cef_units[i, current_held_cef_indices], 0)
+            price_gain_per_unit = (cef_prices[i, current_held_cef_indices] - current_avg_cost_per_unit) / \
+                                  np.where(current_avg_cost_per_unit > 0, current_avg_cost_per_unit, 1)
+
+            sell_signals = price_gain_per_unit >= 0.01
+
+            trades_per_month[i, current_month_index] += sell_signals.sum()
+
+            units_to_sell_profit = np.where(sell_signals, cef_units[i, current_held_cef_indices] * 0.5, 0)
+            units_to_sell_profit = np.minimum(units_to_sell_profit, cef_units[i, current_held_cef_indices])
+
+            value_sold_from_profit = (units_to_sell_profit * cef_prices[i, current_held_cef_indices]).sum()
+            cash[i] += value_sold_from_profit
+
+            for k_idx, j in enumerate(current_held_cef_indices):
+                if units_to_sell_profit[k_idx] > 0:
+                    proportion_sold = units_to_sell_profit[k_idx] / cef_units[i, j]
+                    cef_units[i, j] -= units_to_sell_profit[k_idx]
+                    cost_basis_dollars[i, j] -= (cost_basis_dollars[i, j] * proportion_sold)
+
+                    if cef_units[i, j] < 1e-9:
+                        cef_units[i, j] = 0
+                        cost_basis_dollars[i, j] = 0
+
+    # No fund exceeds 3% of portfolio (without selling at loss)
+    for i in range(num_simulations):
+        current_portfolio_market_value = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
+        three_percent_threshold = current_portfolio_market_value * 0.03
+
+        relevant_cef_indices = np.arange(num_total_cefs_invested_in[i])
+
+        for j in relevant_cef_indices:
+            current_cef_value = cef_prices[i, j] * cef_units[i, j]
+
+            if current_cef_value > three_percent_threshold and cef_units[i, j] > 0:
+
+                current_avg_cost_per_unit_j = cost_basis_dollars[i, j] / cef_units[i, j] if cef_units[i, j] > 0 else 0
+
+                if cef_prices[i, j] < current_avg_cost_per_unit_j:
+                    continue
+
+                excess_value = current_cef_value - three_percent_threshold
+                units_to_sell = excess_value / cef_prices[i, j]
+
+                units_to_sell = min(units_to_sell, cef_units[i, j])
+
+                cef_units[i, j] -= units_to_sell
+                cash[i] += (units_to_sell * cef_prices[i, j])
+
+                if (current_cef_value / cef_prices[i, j]) > 1e-9:
+                    proportion_sold = units_to_sell / (current_cef_value / cef_prices[i, j])
+                    cost_basis_dollars[i, j] -= (cost_basis_dollars[i, j] * proportion_sold)
+                else:
+                    cost_basis_dollars[i, j] = 0
+
+                if cef_units[i, j] < 1e-9:
+                    cef_units[i, j] = 0
+                    cost_basis_dollars[i, j] = 0
+
+    # Distributions (market value * monthly yield)
     gross_potential_income = (cef_prices * cef_units * current_cef_monthly_yields).sum(axis=1)
 
     distributed_portion = gross_potential_income * 0.7
@@ -165,42 +234,92 @@ for month in range(1, total_periods + 1):
     cash += reinvestable_portion
     monthly_reinvested_income[:, current_month_index] = reinvestable_portion
 
-    # Add funds & rebalance (same as your original code) ...
+    # Add new funds & rebalance equal weight (without selling at loss)
+    for i in range(num_simulations):
+        current_portfolio_market_value = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
 
+        while num_total_cefs_invested_in[i] < max_possible_cefs:
+            if current_portfolio_market_value <= 0:
+                break
+
+            potential_next_num_cefs = num_total_cefs_invested_in[i] + 1
+            target_value_for_new_fund = current_portfolio_market_value / potential_next_num_cefs
+
+            new_fund_cash_threshold = target_value_for_new_fund
+
+            if cash[i] >= new_fund_cash_threshold * 0.95:
+                num_total_cefs_invested_in[i] += 1
+                current_portfolio_market_value = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
+            else:
+                break
+
+        if num_total_cefs_invested_in[i] > 0:
+            target_value_per_fund = current_portfolio_market_value / num_total_cefs_invested_in[i]
+
+            for j in range(num_total_cefs_invested_in[i]):
+                current_cef_value = cef_prices[i, j] * cef_units[i, j]
+                diff_value = target_value_per_fund - current_cef_value
+
+                if diff_value > 0:
+                    buyable_units = cash[i] / cef_prices[i, j] if cef_prices[i, j] > 0 else 0
+                    units_needed = diff_value / cef_prices[i, j] if cef_prices[i, j] > 0 else 0
+                    units_to_buy = min(units_needed, buyable_units)
+
+                    if units_to_buy > 0:
+                        cef_units[i, j] += units_to_buy
+                        cost_basis_dollars[i, j] += (units_to_buy * cef_prices[i, j])
+                        cash[i] -= (units_to_buy * cef_prices[i, j])
+
+                elif diff_value < 0 and cef_units[i, j] > 0:
+
+                    current_avg_cost = cost_basis_dollars[i, j] / cef_units[i, j] if cef_units[i, j] > 0 else 0
+
+                    if cef_prices[i, j] < current_avg_cost:
+                        continue
+
+                    units_to_sell_rebalance = abs(diff_value) / cef_prices[i, j] if cef_prices[i, j] > 0 else 0
+                    units_to_sell_rebalance = min(units_to_sell_rebalance, cef_units[i, j])
+
+                    if units_to_sell_rebalance > 0:
+                        cef_units[i, j] -= units_to_sell_rebalance
+                        cash[i] += (units_to_sell_rebalance * cef_prices[i, j])
+
+                        if (cef_units[i, j] + units_to_sell_rebalance) > 1e-9:
+                            proportion_sold = units_to_sell_rebalance / (cef_units[i, j] + units_to_sell_rebalance)
+                            cost_basis_dollars[i, j] -= (cost_basis_dollars[i, j] * proportion_sold)
+                        else:
+                            cost_basis_dollars[i, j] = 0
+
+                    if cef_units[i, j] < 1e-9:
+                        cef_units[i, j] = 0
+                        cost_basis_dollars[i, j] = 0
+
+    # Track working capital (cost basis + cash)
     monthly_working_capital[:, current_month_index] = cash + cost_basis_dollars.sum(axis=1)
 
-# Results summary tables:
+# --- Results Summary Tables ---
 
-final_value = (cef_prices * cef_units).sum(axis=1) + cash
+final_portfolio_value = (cef_prices * cef_units).sum(axis=1) + cash
+final_working_capital = monthly_working_capital[:, -1]
+final_distributed_income = monthly_distributed_income[:, -1]
+final_reinvested_income = monthly_reinvested_income[:, -1]
+
+def summary_df(data):
+    return pd.DataFrame({
+        "Mean": [np.mean(data)],
+        "Median": [np.median(data)],
+        "5th Percentile": [np.percentile(data, 5)],
+        "95th Percentile": [np.percentile(data, 95)]
+    }).round(2)
 
 st.header("Portfolio Value Summary")
-st.write(pd.DataFrame({
-    "Mean": [np.mean(final_value)],
-    "Median": [np.median(final_value)],
-    "5th Percentile": [np.percentile(final_value, 5)],
-    "95th Percentile": [np.percentile(final_value, 95)],
-}))
+st.table(summary_df(final_portfolio_value))
 
-st.header("Working Capital Summary")
-st.write(pd.DataFrame({
-    "Mean": [np.mean(monthly_working_capital[:, -1])],
-    "Median": [np.median(monthly_working_capital[:, -1])],
-    "5th Percentile": [np.percentile(monthly_working_capital[:, -1], 5)],
-    "95th Percentile": [np.percentile(monthly_working_capital[:, -1], 95)],
-}))
+st.header("Working Capital Summary (Cost Basis + Cash)")
+st.table(summary_df(final_working_capital))
 
 st.header("Monthly Distributed Income Summary (Last Month)")
-st.write(pd.DataFrame({
-    "Mean": [np.mean(monthly_distributed_income[:, -1])],
-    "Median": [np.median(monthly_distributed_income[:, -1])],
-    "5th Percentile": [np.percentile(monthly_distributed_income[:, -1], 5)],
-    "95th Percentile": [np.percentile(monthly_distributed_income[:, -1], 95)],
-}))
+st.table(summary_df(final_distributed_income))
 
 st.header("Monthly Reinvested Income Summary (Last Month)")
-st.write(pd.DataFrame({
-    "Mean": [np.mean(monthly_reinvested_income[:, -1])],
-    "Median": [np.median(monthly_reinvested_income[:, -1])],
-    "5th Percentile": [np.percentile(monthly_reinvested_income[:, -1], 5)],
-    "95th Percentile": [np.percentile(monthly_reinvested_income[:, -1], 95)],
-}))
+st.table(summary_df(final_reinvested_income))
