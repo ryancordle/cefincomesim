@@ -2,229 +2,264 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 
-st.set_page_config(page_title="CEF Income Simulation", layout="wide")
+# --- Sidebar Inputs ---
 
-st.title("CEF Portfolio Income & Growth Monte Carlo Simulation")
+st.sidebar.header("Simulation Parameters")
 
-# --- User Inputs ---
+initial_investment = st.sidebar.number_input("Initial Investment ($)", min_value=10000, max_value=1_000_000, value=180000, step=1000)
+years = st.sidebar.slider("Simulation Length (years)", 1, 50, 5)
+reinvest_pct = st.sidebar.slider("Income Reinvestment %", 0, 100, 30)
+num_cefs_initial = st.sidebar.slider("Initial Number of CEFs", 10, 250, 200)
 
-initial_investment = st.sidebar.number_input("Initial Investment ($)", min_value=10000, max_value=1_000_000, value=180000, step=5000)
-years = st.sidebar.slider("Years to Simulate", min_value=1, max_value=30, value=5)
-reinvest_pct = st.sidebar.slider("Income Reinvestment Percentage (%)", min_value=0, max_value=100, value=30)
-num_cefs_initial = st.sidebar.slider("Initial Number of CEFs", min_value=10, max_value=250, value=200)
+# Taxable Income Ratio
+taxable_income_ratio = st.sidebar.slider("Taxable Income Ratio (%)", 0, 100, 50) / 100
 
+# Equity CEF params (annual returns)
+equity_min_return = st.sidebar.slider("Equity CEF Min Annual Return", -0.05, 0.10, 0.04)
+equity_mode_return = st.sidebar.slider("Equity CEF Mode Annual Return", -0.05, 0.15, 0.07)
+equity_max_return = st.sidebar.slider("Equity CEF Max Annual Return", 0.00, 0.20, 0.10)
+
+# Equity yield
+equity_min_yield = st.sidebar.slider("Equity CEF Min Annual Yield", 0.00, 0.10, 0.06)
+equity_mode_yield = st.sidebar.slider("Equity CEF Mode Annual Yield", 0.00, 0.12, 0.08)
+equity_max_yield = st.sidebar.slider("Equity CEF Max Annual Yield", 0.00, 0.15, 0.10)
+
+# Equity volatility
+equity_min_vol = st.sidebar.slider("Equity CEF Min Annual Volatility", 0.10, 0.30, 0.15)
+equity_mode_vol = st.sidebar.slider("Equity CEF Mode Annual Volatility", 0.10, 0.30, 0.17)
+equity_max_vol = st.sidebar.slider("Equity CEF Max Annual Volatility", 0.10, 0.40, 0.20)
+
+# Taxable Income CEF params (annual returns)
+taxable_min_return = st.sidebar.slider("Taxable Income CEF Min Annual Return", -0.05, 0.05, -0.02)
+taxable_mode_return = st.sidebar.slider("Taxable Income CEF Mode Annual Return", -0.05, 0.05, 0.00)
+taxable_max_return = st.sidebar.slider("Taxable Income CEF Max Annual Return", 0.00, 0.10, 0.02)
+
+# Taxable Income yield
+taxable_min_yield = st.sidebar.slider("Taxable Income CEF Min Annual Yield", 0.05, 0.20, 0.08)
+taxable_mode_yield = st.sidebar.slider("Taxable Income CEF Mode Annual Yield", 0.05, 0.25, 0.11)
+taxable_max_yield = st.sidebar.slider("Taxable Income CEF Max Annual Yield", 0.10, 0.30, 0.15)
+
+# Taxable Income volatility
+taxable_min_vol = st.sidebar.slider("Taxable Income CEF Min Annual Volatility", 0.05, 0.20, 0.08)
+taxable_mode_vol = st.sidebar.slider("Taxable Income CEF Mode Annual Volatility", 0.05, 0.25, 0.10)
+taxable_max_vol = st.sidebar.slider("Taxable Income CEF Max Annual Volatility", 0.05, 0.30, 0.12)
+
+# Interest rate params
+initial_market_interest_rate = st.sidebar.slider("Initial Market Interest Rate", 0.00, 0.10, 0.04)
+interest_rate_volatility_monthly = st.sidebar.slider("Interest Rate Monthly Volatility", 0.000, 0.01, 0.003)
+interest_rate_price_sensitivity = st.sidebar.slider("Interest Rate Price Sensitivity", 0.0, 10.0, 4.0)
+yield_sensitivity_to_rates = st.sidebar.slider("Yield Sensitivity to Rates", 0.0, 1.0, 0.5)
+
+# Other constants
 periods_per_year = 12
 total_periods = years * periods_per_year
 num_simulations = 1000
-universe_size = 250
-max_possible_cefs = universe_size
+max_possible_cefs = 250
 
-# --- Parameters ---
-taxable_income_ratio = 0.5
-equity_annual_base_return_dist = (0.04, 0.07, 0.10)
-equity_annual_yield_dist = (0.06, 0.08, 0.10)
-equity_annual_volatility_dist = (0.15, 0.17, 0.20)
-taxable_income_annual_base_return_dist = (-0.02, 0.00, 0.02)
-taxable_income_annual_yield_dist = (0.08, 0.11, 0.15)
-taxable_income_annual_volatility_dist = (0.08, 0.10, 0.12)
-initial_market_interest_rate = 0.04
-interest_rate_volatility_monthly = 0.003
-interest_rate_price_sensitivity = 4.0
-yield_sensitivity_to_rates = 0.5
+# --- Initialize Simulation Variables ---
 
-# --- Initialize CEF Types ---
-np.random.seed(42)
+# Determine CEF types for each sim (True = taxable, False = equity)
 is_taxable_income_cef = np.random.rand(num_simulations, max_possible_cefs) < taxable_income_ratio
 
+# Initialize parameter arrays
 cef_base_annual_returns = np.zeros((num_simulations, max_possible_cefs))
 cef_annual_volatilities = np.zeros((num_simulations, max_possible_cefs))
 cef_base_annual_yields = np.zeros((num_simulations, max_possible_cefs))
 
 for i in range(num_simulations):
-    equity_indices = ~is_taxable_income_cef[i]
-    num_equity = np.sum(equity_indices)
-    if num_equity > 0:
-        cef_base_annual_returns[i, equity_indices] = np.random.triangular(*equity_annual_base_return_dist, size=num_equity)
-        cef_annual_volatilities[i, equity_indices] = np.random.triangular(*equity_annual_volatility_dist, size=num_equity)
-        cef_base_annual_yields[i, equity_indices] = np.random.triangular(*equity_annual_yield_dist, size=num_equity)
-    taxable_indices = is_taxable_income_cef[i]
-    num_taxable = np.sum(taxable_indices)
-    if num_taxable > 0:
-        cef_base_annual_returns[i, taxable_indices] = np.random.triangular(*taxable_income_annual_base_return_dist, size=num_taxable)
-        cef_annual_volatilities[i, taxable_indices] = np.random.triangular(*taxable_income_annual_volatility_dist, size=num_taxable)
-        cef_base_annual_yields[i, taxable_indices] = np.random.triangular(*taxable_income_annual_yield_dist, size=num_taxable)
+    # Equity CEFs
+    equity_idx = ~is_taxable_income_cef[i]
+    n_equity = np.sum(equity_idx)
+    if n_equity > 0:
+        cef_base_annual_returns[i, equity_idx] = np.random.triangular(equity_min_return, equity_mode_return, equity_max_return, n_equity)
+        cef_annual_volatilities[i, equity_idx] = np.random.triangular(equity_min_vol, equity_mode_vol, equity_max_vol, n_equity)
+        cef_base_annual_yields[i, equity_idx] = np.random.triangular(equity_min_yield, equity_mode_yield, equity_max_yield, n_equity)
 
+    # Taxable Income CEFs
+    taxable_idx = is_taxable_income_cef[i]
+    n_taxable = np.sum(taxable_idx)
+    if n_taxable > 0:
+        cef_base_annual_returns[i, taxable_idx] = np.random.triangular(taxable_min_return, taxable_mode_return, taxable_max_return, n_taxable)
+        cef_annual_volatilities[i, taxable_idx] = np.random.triangular(taxable_min_vol, taxable_mode_vol, taxable_max_vol, n_taxable)
+        cef_base_annual_yields[i, taxable_idx] = np.random.triangular(taxable_min_yield, taxable_mode_yield, taxable_max_yield, n_taxable)
+
+# Convert annual to monthly
 cef_monthly_base_returns = cef_base_annual_returns / periods_per_year
 cef_monthly_volatilities = cef_annual_volatilities / np.sqrt(periods_per_year)
+
+# Initialize prices randomly from triangular (3, 21.5, 40)
 cef_prices = np.random.triangular(3, 21.5, 40, size=(num_simulations, max_possible_cefs))
 
-monthly_market_interest_rates = np.zeros((num_simulations, total_periods))
-monthly_market_interest_rates[:, 0] = initial_market_interest_rate
-
-initial_units_per_cef_target_value = (initial_investment / num_cefs_initial)
+# Initialize portfolio units and cost basis
+initial_units_per_cef_target_value = initial_investment / num_cefs_initial
 cef_units = np.zeros((num_simulations, max_possible_cefs))
 cef_units[:, :num_cefs_initial] = initial_units_per_cef_target_value / cef_prices[:, :num_cefs_initial]
-
 cost_basis_dollars = cef_units * cef_prices
+
 cash = np.zeros(num_simulations)
 
+# Arrays to track outputs
 monthly_distributed_income = np.zeros((num_simulations, total_periods))
 monthly_reinvested_income = np.zeros((num_simulations, total_periods))
 monthly_working_capital = np.zeros((num_simulations, total_periods))
 trades_per_month = np.zeros((num_simulations, total_periods))
 num_total_cefs_invested_in = np.full(num_simulations, num_cefs_initial, dtype=int)
 
+# Track market interest rates
+monthly_market_interest_rates = np.zeros((num_simulations, total_periods))
+monthly_market_interest_rates[:, 0] = initial_market_interest_rate
+
 # --- Simulation Loop ---
 for month in range(1, total_periods + 1):
-    current_month_index = month - 1
+    idx = month - 1
 
-    if current_month_index > 0:
-        monthly_market_interest_rates[:, current_month_index] = np.clip(
-            monthly_market_interest_rates[:, current_month_index - 1] + np.random.normal(0, interest_rate_volatility_monthly, num_simulations),
+    # Simulate market interest rate
+    if idx > 0:
+        monthly_market_interest_rates[:, idx] = np.clip(
+            monthly_market_interest_rates[:, idx-1] + np.random.normal(0, interest_rate_volatility_monthly, num_simulations),
             0.005, 0.15
         )
-    current_interest_rate_for_month = monthly_market_interest_rates[:, current_month_index]
+    current_rate = monthly_market_interest_rates[:, idx]
+    rate_delta = np.zeros(num_simulations) if idx == 0 else current_rate - monthly_market_interest_rates[:, idx-1]
 
-    if current_month_index == 0:
-        interest_rate_delta = np.zeros(num_simulations)
-    else:
-        interest_rate_delta = current_interest_rate_for_month - monthly_market_interest_rates[:, current_month_index - 1]
+    # Price returns adjusted for interest rate impact
+    price_impact = -rate_delta * interest_rate_price_sensitivity
 
-    price_impact_from_rates = -interest_rate_delta * interest_rate_price_sensitivity
-    returns = np.random.normal(
-        cef_monthly_base_returns, cef_monthly_volatilities, size=(num_simulations, max_possible_cefs)
-    )
-    returns += price_impact_from_rates[:, np.newaxis]
+    returns = np.random.normal(cef_monthly_base_returns, cef_monthly_volatilities)
+    returns += price_impact[:, np.newaxis]
     cef_prices *= (1 + returns)
 
-    yield_adjustment_from_rates = (current_interest_rate_for_month - initial_market_interest_rate) * yield_sensitivity_to_rates
-    current_cef_monthly_yields = np.clip(
-        cef_base_annual_yields / periods_per_year + yield_adjustment_from_rates[:, np.newaxis] / periods_per_year,
+    # Adjust yields
+    yield_adj = (current_rate - initial_market_interest_rate) * yield_sensitivity_to_rates
+    current_yields = np.clip(
+        cef_base_annual_yields / periods_per_year + yield_adj[:, np.newaxis] / periods_per_year,
         0.001, 0.20 / periods_per_year
     )
 
-    # SELL PROFITS >1%
+    # SELL: Take profits > 1%
     for i in range(num_simulations):
-        held_indices = np.where(cef_units[i, :num_total_cefs_invested_in[i]] > 0)[0]
-        if held_indices.size > 0:
-            avg_cost = np.where(cef_units[i, held_indices] > 0,
-                                cost_basis_dollars[i, held_indices] / cef_units[i, held_indices], 0)
-            price_gain = (cef_prices[i, held_indices] - avg_cost) / np.where(avg_cost > 0, avg_cost, 1)
-            sell_signals = price_gain >= 0.01
-            trades_per_month[i, current_month_index] += sell_signals.sum()
-            units_to_sell = np.where(sell_signals, cef_units[i, held_indices] * 0.5, 0)
-            units_to_sell = np.minimum(units_to_sell, cef_units[i, held_indices])
-            value_sold = (units_to_sell * cef_prices[i, held_indices]).sum()
-            cash[i] += value_sold
-            for idx, cef_idx in enumerate(held_indices):
-                if units_to_sell[idx] > 0:
-                    proportion_sold = units_to_sell[idx] / cef_units[i, cef_idx]
-                    cef_units[i, cef_idx] -= units_to_sell[idx]
-                    cost_basis_dollars[i, cef_idx] -= cost_basis_dollars[i, cef_idx] * proportion_sold
-                    if cef_units[i, cef_idx] < 1e-9:
-                        cef_units[i, cef_idx] = 0
-                        cost_basis_dollars[i, cef_idx] = 0
+        held_idx = np.where(cef_units[i, :num_total_cefs_invested_in[i]] > 0)[0]
+        if held_idx.size > 0:
+            avg_cost = np.where(cef_units[i, held_idx] > 0,
+                                cost_basis_dollars[i, held_idx] / cef_units[i, held_idx], 0)
+            gains = (cef_prices[i, held_idx] - avg_cost) / np.where(avg_cost > 0, avg_cost, 1)
+            sell_signals = gains >= 0.01
+            trades_per_month[i, idx] += sell_signals.sum()
 
-    # No fund >3%
+            units_to_sell = np.where(sell_signals, cef_units[i, held_idx] * 0.5, 0)
+            units_to_sell = np.minimum(units_to_sell, cef_units[i, held_idx])
+            value_sold = (units_to_sell * cef_prices[i, held_idx]).sum()
+            cash[i] += value_sold
+
+            for k, cef_j in enumerate(held_idx):
+                if units_to_sell[k] > 0:
+                    prop = units_to_sell[k] / cef_units[i, cef_j]
+                    cef_units[i, cef_j] -= units_to_sell[k]
+                    cost_basis_dollars[i, cef_j] -= cost_basis_dollars[i, cef_j] * prop
+                    if cef_units[i, cef_j] < 1e-9:
+                        cef_units[i, cef_j] = 0
+                        cost_basis_dollars[i, cef_j] = 0
+
+    # No fund >3% of portfolio (no selling at loss)
     for i in range(num_simulations):
-        portfolio_value = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
-        three_pct = portfolio_value * 0.03
+        port_val = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
+        thresh = port_val * 0.03
         for j in range(num_total_cefs_invested_in[i]):
             val = cef_prices[i, j] * cef_units[i, j]
-            if val > three_pct and cef_units[i, j] > 0:
-                avg_cost = cost_basis_dollars[i, j] / cef_units[i, j] if cef_units[i, j] > 0 else 0
-                if cef_prices[i, j] < avg_cost:
+            if val > thresh and cef_units[i, j] > 0:
+                avg_cost_j = cost_basis_dollars[i, j] / cef_units[i, j] if cef_units[i, j] > 0 else 0
+                if cef_prices[i, j] < avg_cost_j:
                     continue
-                excess_val = val - three_pct
-                units_to_sell = min(excess_val / cef_prices[i, j], cef_units[i, j])
-                cef_units[i, j] -= units_to_sell
-                cash[i] += units_to_sell * cef_prices[i, j]
-                if (cef_units[i, j] + units_to_sell) > 1e-9:
-                    proportion_sold = units_to_sell / (cef_units[i, j] + units_to_sell)
-                    cost_basis_dollars[i, j] -= cost_basis_dollars[i, j] * proportion_sold
-                else:
-                    cost_basis_dollars[i, j] = 0
+                excess_val = val - thresh
+                units_sell = min(excess_val / cef_prices[i, j], cef_units[i, j])
+                cef_units[i, j] -= units_sell
+                cash[i] += units_sell * cef_prices[i, j]
+                prop = units_sell / (cef_units[i, j] + units_sell) if (cef_units[i, j] + units_sell) > 1e-9 else 0
+                cost_basis_dollars[i, j] -= cost_basis_dollars[i, j] * prop
                 if cef_units[i, j] < 1e-9:
                     cef_units[i, j] = 0
                     cost_basis_dollars[i, j] = 0
 
-    # Income distributions
-    gross_income = (cef_prices * cef_units * current_cef_monthly_yields).sum(axis=1)
-    distributed = gross_income * (1 - reinvest_pct / 100)
-    reinvested = gross_income * (reinvest_pct / 100)
-    cash += distributed
-    monthly_distributed_income[:, current_month_index] = distributed
-    monthly_reinvested_income[:, current_month_index] = reinvested
-    cash += reinvested  # add reinvested income to cash for rebalancing
+    # Distributions & reinvestment
+    gross_income = (cef_prices * cef_units * current_yields).sum(axis=1)
+    dist_income = gross_income * (1 - reinvest_pct / 100)
+    reinvest_income = gross_income * (reinvest_pct / 100)
+    monthly_distributed_income[:, idx] = dist_income
+    cash += reinvest_income
+    monthly_reinvested_income[:, idx] = reinvest_income
 
-    # Add new funds & rebalance to equal weight (no selling at loss)
+    # Add new funds & rebalance equal weight (no selling at loss)
     for i in range(num_simulations):
-        portfolio_value = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
+        port_val = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
         while num_total_cefs_invested_in[i] < max_possible_cefs:
-            next_num = num_total_cefs_invested_in[i] + 1
-            target_val = portfolio_value / next_num
+            if port_val <= 0:
+                break
+            potential_num = num_total_cefs_invested_in[i] + 1
+            target_val = port_val / potential_num
             if cash[i] >= target_val * 0.95:
-                num_total_cefs_invested_in[i] = next_num
-                portfolio_value = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
+                num_total_cefs_invested_in[i] += 1
+                port_val = (cef_prices[i, :] * cef_units[i, :]).sum() + cash[i]
             else:
                 break
+
         if num_total_cefs_invested_in[i] > 0:
-            target_val = portfolio_value / num_total_cefs_invested_in[i]
+            target_val = port_val / num_total_cefs_invested_in[i]
             for j in range(num_total_cefs_invested_in[i]):
                 current_val = cef_prices[i, j] * cef_units[i, j]
                 diff = target_val - current_val
                 if diff > 0:
-                    buy_units = min(cash[i] / cef_prices[i, j], diff / cef_prices[i, j])
-                    if buy_units > 0:
-                        cef_units[i, j] += buy_units
-                        cost_basis_dollars[i, j] += buy_units * cef_prices[i, j]
-                        cash[i] -= buy_units * cef_prices[i, j]
+                    units_can_buy = cash[i] / cef_prices[i, j] if cef_prices[i, j] > 0 else 0
+                    units_needed = diff / cef_prices[i, j] if cef_prices[i, j] > 0 else 0
+                    units_buy = min(units_needed, units_can_buy)
+                    if units_buy > 0:
+                        cef_units[i, j] += units_buy
+                        cost_basis_dollars[i, j] += units_buy * cef_prices[i, j]
+                        cash[i] -= units_buy * cef_prices[i, j]
                 elif diff < 0 and cef_units[i, j] > 0:
-                    avg_cost = cost_basis_dollars[i, j] / cef_units[i, j] if cef_units[i, j] > 0 else 0
-                    if cef_prices[i, j] < avg_cost:
+                    avg_cost_j = cost_basis_dollars[i, j] / cef_units[i, j] if cef_units[i, j] > 0 else 0
+                    if cef_prices[i, j] < avg_cost_j:
                         continue
-                    sell_units = min(abs(diff) / cef_prices[i, j], cef_units[i, j])
-                    if sell_units > 0:
-                        cef_units[i, j] -= sell_units
-                        cash[i] += sell_units * cef_prices[i, j]
-                        proportion_sold = sell_units / (cef_units[i, j] + sell_units)
-                        cost_basis_dollars[i, j] -= cost_basis_dollars[i, j] * proportion_sold
+                    units_sell = min(abs(diff) / cef_prices[i, j], cef_units[i, j])
+                    if units_sell > 0:
+                        cef_units[i, j] -= units_sell
+                        cash[i] += units_sell * cef_prices[i, j]
+                        prop = units_sell / (cef_units[i, j] + units_sell) if (cef_units[i, j] + units_sell) > 1e-9 else 0
+                        cost_basis_dollars[i, j] -= cost_basis_dollars[i, j] * prop
                     if cef_units[i, j] < 1e-9:
                         cef_units[i, j] = 0
                         cost_basis_dollars[i, j] = 0
 
-    monthly_working_capital[:, current_month_index] = cash + cost_basis_dollars.sum(axis=1)
+    # Track working capital = cash + cost basis sum
+    monthly_working_capital[:, idx] = cash + cost_basis_dollars.sum(axis=1)
 
-# --- Results ---
+# --- Results Summary ---
 
-final_market_value = (cef_prices * cef_units).sum(axis=1) + cash
+final_portfolio_value = (cef_prices * cef_units).sum(axis=1) + cash
 
-def summarize_metric(arr, label):
+def summary_df(data, name):
     return pd.DataFrame({
-        "Mean": np.mean(arr),
-        "Median": np.median(arr),
-        "5th Percentile": np.percentile(arr, 5),
-        "95th Percentile": np.percentile(arr, 95)
-    }, index=[label])
+        f"{name} Mean": [np.mean(data)],
+        f"{name} Median": [np.median(data)],
+        f"{name} 5th %ile": [np.percentile(data, 5)],
+        f"{name} 95th %ile": [np.percentile(data, 95)],
+    })
 
-st.header("Portfolio Summary at End of Simulation")
+# Summary tables for final values
+port_val_summary = summary_df(final_portfolio_value, "Portfolio Value ($)")
+working_cap_summary = summary_df(monthly_working_capital[:, -1], "Working Capital ($)")
+income_summary = summary_df(monthly_distributed_income[:, -1], "Monthly Distributed Income ($)")
+reinvest_summary = summary_df(monthly_reinvested_income[:, -1], "Monthly Reinvested Income ($)")
 
-df_market_val = summarize_metric(final_market_value, "Market Value")
-df_working_cap = summarize_metric(monthly_working_capital[:, -1], "Working Capital (Cost Basis + Cash)")
-df_dist_income = summarize_metric(monthly_distributed_income[:, -1], "Distributed Income (Monthly)")
-df_reinvest_income = summarize_metric(monthly_reinvested_income[:, -1], "Reinvested Income (Monthly)")
+st.header("Simulation Results (After {} Years)".format(years))
 
-summary_df = pd.concat([df_market_val, df_working_cap, df_dist_income, df_reinvest_income])
-st.table(summary_df.style.format("${:,.2f}"))
+st.subheader("Portfolio Value Summary")
+st.table(port_val_summary.T)
 
-st.header("CEF Investment Count")
+st.subheader("Working Capital Summary")
+st.table(working_cap_summary.T)
 
-st.write(f"Mean CEFs Invested In: {np.mean(num_total_cefs_invested_in):.1f}")
-st.write(f"Median CEFs Invested In: {np.median(num_total_cefs_invested_in):.0f}")
-st.write(f"Min CEFs Invested In: {np.min(num_total_cefs_invested_in)}")
-st.write(f"Max CEFs Invested In: {np.max(num_total_cefs_invested_in)}")
+st.subheader("Monthly Distributed Income Summary")
+st.table(income_summary.T)
 
-st.markdown("---")
-
-st.write("### Note: This simulation runs 1000 trials with stochastic returns and distributions based on your inputs.")
-
+st.subheader("Monthly Reinvested Income Summary")
+st.table(reinvest_summary.T)
