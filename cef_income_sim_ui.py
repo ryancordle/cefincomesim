@@ -91,15 +91,14 @@ if run_sim:
 
         for i in range(simulations):
             for j in range(universe_size):
-                if prices[i, j] == 0:
-                    continue
-                target_units = reinvest_unit_value / prices[i, j]
-                diff = target_units - units[i, j]
-                if diff > 0:
-                    buy = min(diff, cash[i] / prices[i, j])
-                    cost_basis[i, j] += buy * prices[i, j]
-                    units[i, j] += buy
-                    cash[i] -= buy * prices[i, j]
+                if prices[i, j] > 0:
+                    target_units = reinvest_unit_value / prices[i, j]
+                    diff = target_units - units[i, j]
+                    if diff > 0:
+                        buy = min(diff, cash[i] / prices[i, j])
+                        cost_basis[i, j] += buy * prices[i, j]
+                        units[i, j] += buy
+                        cash[i] -= buy * prices[i, j]
 
         monthly_working_capital[:, m] = cash + cost_basis.sum(axis=1)
         monthly_income[:, m] = income * 12
