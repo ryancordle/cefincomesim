@@ -62,14 +62,19 @@ if run_sim:
     portfolio_df = pd.DataFrame(monthly_records).T
     portfolio_df.columns = [f"Sim {i+1}" for i in range(simulations)]
 
-    st.subheader("📊 Simulation Results")
-    st.write(f"Final Median Portfolio Value: **${portfolio_df.iloc[-1].median():,.0f}**")
-    st.write(f"Final 5th Percentile: **${portfolio_df.iloc[-1].quantile(0.05):,.0f}**, Final 95th Percentile: **${portfolio_df.iloc[-1].quantile(0.95):,.0f}**")
+    final_values = portfolio_df.iloc[-1]
+    summary_df = pd.DataFrame({
+        "Metric": ["Median", "Mean", "5th Percentile", "95th Percentile"],
+        "Final Portfolio Value": [
+            f"${final_values.median():,.0f}",
+            f"${final_values.mean():,.0f}",
+            f"${final_values.quantile(0.05):,.0f}",
+            f"${final_values.quantile(0.95):,.0f}"
+        ]
+    })
 
-    st.line_chart(portfolio_df[[f"Sim {i+1}" for i in range(min(10, simulations))]])
-
-    percentiles = portfolio_df.quantile([0.05, 0.5, 0.95], axis=1).T
-    st.area_chart(percentiles)
+    st.subheader("📊 Simulation Summary Table")
+    st.dataframe(summary_df.set_index("Metric"))
 
     st.caption("Note: Simulation reflects approximate monthly compounding of yield + growth assumptions. Use as planning tool, not forecast.")
 else:
