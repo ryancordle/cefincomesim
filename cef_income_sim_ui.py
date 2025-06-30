@@ -14,6 +14,7 @@ This app simulates long-term growth and income of a closed-end fund (CEF) portfo
 
 # --- Sidebar Inputs ---
 st.sidebar.header("Simulation Settings")
+run_sim = st.sidebar.button("▶️ Run Simulation")
 
 initial_investment = st.sidebar.number_input("Initial Investment ($)", 10000, 1000000, 180000, step=10000)
 years = st.sidebar.slider("Years to Simulate", 1, 40, 19)
@@ -29,8 +30,6 @@ taxable_yield = st.sidebar.slider("Taxable Income CEF Yield Range (%)", 6, 20, (
 st.sidebar.header("Assumed Price Growth Ranges (Annual)")
 equity_growth = st.sidebar.slider("Equity CEF Growth Range (%)", -5, 15, (4, 10))
 taxable_growth = st.sidebar.slider("Taxable CEF Growth Range (%)", -5, 5, (-2, 2))
-
-run_sim = st.sidebar.button("Run Simulation")
 
 if run_sim:
     # --- Simulation Logic ---
